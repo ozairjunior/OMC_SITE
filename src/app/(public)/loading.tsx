@@ -1,0 +1,1 @@
+export default function PublicLoading() { return <div className="mx-auto min-h-screen max-w-7xl animate-pulse p-6"><div className="mb-6 h-8 w-48 rounded bg-slate-200" /><div className="h-64 rounded-xl bg-slate-200" /></div>; }

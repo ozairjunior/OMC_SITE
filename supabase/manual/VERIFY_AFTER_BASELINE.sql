@@ -1,0 +1,9 @@
+-- Somente leitura. Execute após aplicar o baseline em um banco novo.
+SELECT lower(email) AS email, id, email_confirmed_at FROM auth.users WHERE lower(email)=lower('jjunior2100@gmail.com');
+SELECT p.id,p.full_name,p.role,p.is_active FROM public.profiles p JOIN auth.users u ON u.id=p.id WHERE lower(u.email)=lower('jjunior2100@gmail.com');
+SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('products','product_variants','product_costs','orders','order_items','stock_movements','admin_audit_logs','categories','brands','profiles') ORDER BY table_name;
+SELECT table_name,column_name FROM information_schema.columns WHERE table_schema='public' AND ((table_name='products' AND column_name IN ('price','promotional_price','barcode','brand')) OR (table_name='product_variants' AND column_name='price_adjustment')) ORDER BY table_name,column_name;
+SELECT c.relname AS table_name,c.relrowsecurity AS rls_enabled FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' ORDER BY c.relname;
+SELECT 'products' AS table_name,count(*) AS row_count FROM public.products UNION ALL SELECT 'product_variants',count(*) FROM public.product_variants UNION ALL SELECT 'orders',count(*) FROM public.orders UNION ALL SELECT 'order_items',count(*) FROM public.order_items UNION ALL SELECT 'profiles',count(*) FROM public.profiles UNION ALL SELECT 'stock_movements',count(*) FROM public.stock_movements UNION ALL SELECT 'admin_audit_logs',count(*) FROM public.admin_audit_logs;
+SELECT id,name,public,file_size_limit,allowed_mime_types FROM storage.buckets WHERE id='product-images';
+SELECT n.nspname AS schema_name,p.proname,pg_get_function_identity_arguments(p.oid) AS arguments FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('admin_save_product','create_catalog_order','adjust_stock','admin_transition_order_status') ORDER BY p.proname,arguments;

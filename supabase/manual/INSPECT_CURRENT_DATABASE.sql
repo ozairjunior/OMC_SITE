@@ -1,0 +1,22 @@
+-- Somente leitura. Não contém comandos de alteração.
+SELECT version() AS postgres_version;
+SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name;
+SELECT table_schema, table_name, column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema='public' ORDER BY table_name, ordinal_position;
+SELECT tc.table_name, tc.constraint_name, tc.constraint_type, kcu.column_name FROM information_schema.table_constraints tc LEFT JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name AND kcu.table_schema=tc.table_schema WHERE tc.table_schema='public' ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position;
+SELECT n.nspname AS schema_name, c.relname AS table_name, i.relname AS index_name, pg_get_indexdef(i.oid) AS definition FROM pg_index x JOIN pg_class c ON c.oid=x.indrelid JOIN pg_class i ON i.oid=x.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.relname,i.relname;
+SELECT sequence_schema, sequence_name, data_type, start_value, minimum_value, maximum_value, increment FROM information_schema.sequences WHERE sequence_schema='public' ORDER BY sequence_name;
+SELECT n.nspname AS schema_name, t.typname AS enum_name, e.enumsortorder, e.enumlabel FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace JOIN pg_enum e ON e.enumtypid=t.oid WHERE n.nspname='public' ORDER BY t.typname,e.enumsortorder;
+SELECT schemaname, viewname, definition FROM pg_views WHERE schemaname='public' ORDER BY viewname;
+SELECT n.nspname AS schema_name, p.proname, pg_get_function_identity_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS return_type, p.prosecdef AS security_definer, pg_get_functiondef(p.oid) AS definition FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' ORDER BY p.proname, arguments;
+SELECT event_object_schema, event_object_table, trigger_name, action_timing, event_manipulation, action_statement FROM information_schema.triggers WHERE event_object_schema='public' ORDER BY event_object_table, trigger_name;
+SELECT t.schemaname, t.tablename, t.rowsecurity, c.relforcerowsecurity AS forcerowsecurity FROM pg_tables t JOIN pg_class c ON c.relname=t.tablename JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname=t.schemaname WHERE t.schemaname='public' ORDER BY t.tablename;
+SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check FROM pg_policies WHERE schemaname='public' ORDER BY tablename, policyname;
+SELECT table_schema, table_name, grantee, privilege_type FROM information_schema.table_privileges WHERE table_schema='public' AND grantee IN ('anon','authenticated','service_role') ORDER BY table_name, grantee, privilege_type;
+SELECT n.nspname AS schema_name, c.relname AS object_name, r.rolname AS grantee, has_table_privilege(r.rolname,c.oid,'SELECT') AS can_select, has_table_privilege(r.rolname,c.oid,'INSERT') AS can_insert, has_table_privilege(r.rolname,c.oid,'UPDATE') AS can_update, has_table_privilege(r.rolname,c.oid,'DELETE') AS can_delete FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN (VALUES ('anon'::name),('authenticated'::name),('service_role'::name)) r(rolname) WHERE n.nspname='public' AND c.relkind IN ('r','v','m') ORDER BY c.relname,r.rolname;
+SELECT id, name, public, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id='product-images';
+SELECT policyname, permissive, roles, cmd, qual, with_check FROM pg_policies WHERE schemaname='storage' AND tablename='objects' ORDER BY policyname;
+SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='supabase_migrations' AND table_name='schema_migrations';
+SELECT id, email, email_confirmed_at, created_at, raw_user_meta_data->>'full_name' AS full_name FROM auth.users WHERE lower(email)=lower('jjunior2100@gmail.com');
+SELECT p.id, p.full_name, p.role, p.is_active FROM public.profiles p JOIN auth.users u ON u.id=p.id WHERE lower(u.email)=lower('jjunior2100@gmail.com');
+SELECT u.id, count(f.id) AS mfa_factor_count, array_agg(DISTINCT f.factor_type) FILTER (WHERE f.id IS NOT NULL) AS factor_types FROM auth.users u LEFT JOIN auth.mfa_factors f ON f.user_id=u.id WHERE lower(u.email)=lower('jjunior2100@gmail.com') GROUP BY u.id;
+SELECT schemaname AS table_schema, relname AS table_name, n_live_tup AS estimated_row_count FROM pg_stat_user_tables WHERE schemaname='public' ORDER BY relname;

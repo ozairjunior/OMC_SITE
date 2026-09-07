@@ -1,0 +1,8 @@
+-- Somente leitura: valida a estrutura de um banco criado pelo baseline V1.
+SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('products','product_variants','product_costs','categories','brands','orders','order_items','stock_movements','admin_audit_logs','profiles') ORDER BY table_name;
+SELECT table_name,column_name FROM information_schema.columns WHERE table_schema='public' AND ((table_name='products' AND column_name IN ('price','promotional_price','barcode','brand')) OR (table_name='product_variants' AND column_name='price_adjustment'));
+SELECT 'products' AS table_name,count(*) AS row_count FROM public.products UNION ALL SELECT 'product_variants',count(*) FROM public.product_variants UNION ALL SELECT 'orders',count(*) FROM public.orders UNION ALL SELECT 'profiles',count(*) FROM public.profiles;
+SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND indexname IN ('product_variants_barcode_unique','product_images_one_primary','orders_tracking_token_unique','product_variant_sku_counters_pkey');
+SELECT c.relname AS table_name,c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' ORDER BY c.relname;
+SELECT id,name,public,file_size_limit,allowed_mime_types FROM storage.buckets WHERE id='product-images';
+SELECT p.proname,pg_get_function_identity_arguments(p.oid) AS arguments FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('admin_save_product','create_catalog_order','adjust_stock','admin_transition_order_status') ORDER BY p.proname,arguments;

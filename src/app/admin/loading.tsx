@@ -1,0 +1,1 @@
+export default function AdminLoading() { return <div className="min-h-screen animate-pulse p-6"><div className="mb-6 h-10 rounded bg-slate-200" /><div className="h-64 rounded-xl bg-slate-200" /></div>; }
