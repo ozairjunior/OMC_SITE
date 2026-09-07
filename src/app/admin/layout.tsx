@@ -1,0 +1,5 @@
+'use client';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { AdminLogoutButton } from '@/components/admin/AdminLogoutButton';
+export default function AdminLayout({children}:{children:React.ReactNode}){const pathname=usePathname();if(pathname==='/admin/login')return <>{children}</>;return <div className="min-h-screen bg-slate-50"><header className="border-b bg-white"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3"><Link href="/admin/dashboard" className="font-bold text-slate-900">OMC Administração</Link><AdminLogoutButton/></div><nav className="mx-auto flex max-w-7xl gap-4 overflow-x-auto px-4 pb-3 text-sm text-slate-600"><Link href="/admin/dashboard">Dashboard</Link><Link href="/admin/pedidos">Pedidos</Link><Link href="/admin/produtos">Produtos</Link><Link href="/admin/estoque">Estoque</Link><Link href="/admin/categorias">Categorias</Link><Link href="/admin/marcas">Marcas</Link><Link href="/admin/usuarios">Usuários</Link><Link href="/admin/auditoria">Auditoria</Link><Link href="/admin/seguranca">Segurança</Link></nav></header>{children}</div>}
