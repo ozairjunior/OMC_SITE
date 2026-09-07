@@ -1,0 +1,1059 @@
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\(public)\produtos\page.tsx
+============================================================
+import { createClient } from '@/lib/supabase/server';
+import { ProductCard } from '@/components/ui/ProductCard';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { CategoryPills } from '@/components/ui/CategoryPills';
+import { signedProductImageUrls } from '@/lib/images/urls';
+import Link from 'next/link';
+
+export default async function CatalogPage({ searchParams }: { searchParams: Promise<{ q?: string; categoria?: string }> }) {
+  const filters = await searchParams; const q = (filters.q || '').slice(0, 80).replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim(); const categorySlug = filters.categoria || ''; const supabase = await createClient();
+  const [{ data: categories }, { data: rawProducts, error }] = await Promise.all([
+    supabase.from('categories').select('id,name,slug,display_order').eq('is_active', true).order('display_order'),
+    supabase.from('products').select('id,name,slug,sku,barcode,price,unit,minimum_quantity,step_quantity,brand,featured,category_id,categories(name,slug),product_variants(id,name,sku,barcode,stock_quantity,sale_price,is_active),product_images(storage_path,is_primary)').eq('is_active', true).eq('product_images.is_primary', true).order('created_at', { ascending: false }),
+  ]);
+  const products = await Promise.all((rawProducts || []).filter((p: any) => { const c = Array.isArray(p.categories) ? p.categories[0] : p.categories; const variants = p.product_variants || []; const hay = `${p.name} ${p.brand || ''} ${p.sku || ''} ${p.barcode || ''} ${variants.map((v: any) => `${v.sku || ''} ${v.barcode || ''}`).join(' ')}`.toLocaleLowerCase(); return (!categorySlug || c?.slug === categorySlug) && (!q || hay.includes(q.toLocaleLowerCase())); }).map(async (p: any) => ({ ...p, product_images: await signedProductImageUrls(p.product_images || []) })));
+  const featured = products.filter((p: any) => p.featured).slice(0, 8); const grouped = (categories || []).map((c: any) => ({ category: c, products: products.filter((p: any) => p.category_id === c.id).sort((a: any, b: any) => Number(Boolean(b.featured)) - Number(Boolean(a.featured))).slice(0, 8) })).filter((g) => g.products.length); const selectedCategory = (categories || []).find((c: any) => c.slug === categorySlug); const searchMode = Boolean(q || categorySlug);
+  return <div className="mx-auto max-w-7xl space-y-8 px-4 py-8"><div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><h1 className="text-2xl font-bold text-slate-900">{searchMode ? `Resultados para “${q || categorySlug}”` : 'Catálogo de produtos'}</h1><p className="text-sm text-slate-500">Encontre materiais para sua obra</p></div><SearchInput /></div>{categories && <CategoryPills categories={categories} />}{error ? <div className="rounded-xl bg-red-50 p-8 text-center text-red-700">Erro ao carregar os produtos do catálogo.</div> : searchMode ? <ProductGrid products={products} /> : <>{featured.length > 0 && <Section title="Destaques gerais"><ProductGrid products={featured} /></Section>}{grouped.map(({ category, products: items }) => <Section key={category.id} title={category.name} href={`/produtos?categoria=${category.slug}`}><ProductGrid products={items} /></Section>)}{featured.length === 0 && grouped.length === 0 && <Empty />}</>}</div>;
+}
+function Section({ title, href, children }: { title: string; href?: string; children: React.ReactNode }) { return <section className="space-y-3"><div className="flex items-center justify-between border-b border-slate-200 pb-2"><h2 className="text-lg font-bold uppercase tracking-wide text-slate-800">{title}</h2>{href && <Link href={href} className="text-sm font-semibold text-amber-700 hover:underline">Ver todos →</Link>}</div>{children}</section>; }
+function ProductGrid({ products }: { products: any[] }) { return products.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">{products.map((product) => <ProductCard key={product.id} product={product} compact featured={Boolean(product.featured)} />)}</div> : <Empty />; }
+function Empty() { return <div className="rounded-xl border border-dashed p-12 text-center text-slate-500">Nenhum produto encontrado.</div>; }
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\admin\estoque\page.tsx
+============================================================
+import { requireAdminPage } from '@/lib/auth/server';
+import { StockManager } from '@/components/admin/StockManager';
+
+export default async function StockPage() {
+  const { supabase } = await requireAdminPage();
+  const { data } = await supabase.from('product_variants').select('id, name, stock_quantity, low_stock_threshold, products(name)').eq('is_active', true).order('name');
+  return <main className="mx-auto max-w-6xl p-6"><h1 className="mb-6 text-2xl font-bold">Controle de estoque</h1><StockManager variants={(data ?? []).map((item: any) => ({ ...item, productName: item.products?.name ?? 'Produto' }))} /></main>;
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\admin\produtos\page.tsx
+============================================================
+import Link from 'next/link';
+import { requireAdminPage } from '@/lib/auth/server';
+import { AdminLogoutButton } from '@/components/admin/AdminLogoutButton';
+import { Plus, Edit, Package, AlertCircle } from 'lucide-react';
+
+export default async function AdminProductsPage({ searchParams }: { searchParams: Promise<{ pagina?: string }> }) {
+  const { supabase } = await requireAdminPage();
+  const filters = await searchParams;
+  const page = Math.max(1, Number.parseInt(filters.pagina || '1', 10) || 1);
+  const pageSize = 30;
+
+  // Busca produtos com suas categorias e variações atreladas
+  const { data: products, error } = await supabase
+    .from('products')
+    .select(`
+      id,
+      name,
+      sku,
+      price,
+      unit,
+      is_active,
+      categories ( name ),
+      product_variants ( id, stock_quantity, low_stock_threshold, is_active )
+    `, { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range((page - 1) * pageSize, page * pageSize - 1);
+
+  if (error) {
+    return <div className="p-6 text-red-600">Erro ao carregar produtos: {error.message}</div>;
+  }
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Gerenciamento de Produtos 📦</h1>
+          <p className="text-sm text-slate-500">Cadastre e edite o catálogo da loja</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/admin/produtos/novo"
+            className="bg-amber-600 hover:bg-amber-700 text-white font-medium px-4 py-2 rounded-lg flex items-center space-x-2 transition"
+          >
+            <Plus className="h-5 w-5" />
+            <span>Novo Produto</span>
+          </Link>
+          <AdminLogoutButton />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold">
+            <tr>
+              <th className="p-4">Produto</th>
+              <th className="p-4">Categoria</th>
+              <th className="p-4">Preço Base</th>
+              <th className="p-4">Variações</th>
+              <th className="p-4">Status</th>
+              <th className="p-4 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {products?.map((product: any) => {
+              const hasLowStock = product.product_variants?.some(
+                (v: any) => v.is_active && v.stock_quantity <= v.low_stock_threshold
+              );
+
+              return (
+                <tr key={product.id} className="hover:bg-slate-50">
+                  <td className="p-4 font-medium text-slate-900">
+                    {product.name}
+                    {product.sku && <span className="block text-xs text-slate-400 font-mono">{product.sku}</span>}
+                  </td>
+                  <td className="p-4 text-slate-600">{product.categories?.name || 'Sem Categoria'}</td>
+                  <td className="p-4 font-semibold text-slate-800">
+                    R$ {Number(product.price).toFixed(2)} / {product.unit}
+                  </td>
+                  <td className="p-4">
+                    <span className="inline-flex items-center gap-1 text-slate-600">
+                      <Package className="h-4 w-4" />
+                      {product.product_variants?.length || 0}
+                    </span>
+                    {hasLowStock && (
+                      <span className="ml-2 inline-flex items-center text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">
+                        <AlertCircle className="h-3 w-3 mr-1" /> Estoque Baixo
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-4">
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                      product.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {product.is_active ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <Link
+                      href={`/admin/produtos/${product.id}`}
+                      className="inline-flex items-center p-2 text-slate-600 hover:text-amber-600 hover:bg-slate-100 rounded-lg transition"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex justify-center items-center gap-3">
+        {page > 1 && <Link href={`/admin/produtos?pagina=${page - 1}`} className="px-3 py-2 border rounded-lg text-sm">Anterior</Link>}
+        <span className="text-sm text-slate-500">Página {page}</span>
+        {products?.length === pageSize && <Link href={`/admin/produtos?pagina=${page + 1}`} className="px-3 py-2 border rounded-lg text-sm">Próxima</Link>}
+      </div>
+    </div>
+  );
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\api\admin\brands\route.ts
+============================================================
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { requireAdminApi } from '@/lib/auth/server';
+
+const inputSchema = z.object({ name: z.string().trim().min(2).max(100) });
+
+export async function GET(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  const q = new URL(request.url).searchParams.get('q')?.trim() ?? '';
+  let query = auth.supabase.from('brands').select('id,name,slug,is_active,created_at,updated_at,products(count)').order('name');
+  if (q) query = query.ilike('name', `%${q}%`);
+  const { data, error } = await query;
+  if (error) return NextResponse.json({ error: { code: 'BRAND_LIST_FAILED', message: 'Não foi possível carregar marcas.' } }, { status: 500 });
+  return NextResponse.json(data);
+}
+
+export async function POST(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  const parsed = inputSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: { code: 'BRAND_INVALID', message: 'Nome de marca inválido.' } }, { status: 400 });
+  const { data, error } = await auth.supabase.rpc('admin_create_brand', { p_name: parsed.data.name, p_user_id: auth.user.id });
+  if (error) {
+    const status = error.code === '23505' ? 409 : 500;
+    return NextResponse.json({ error: { code: 'BRAND_CREATE_FAILED', message: status === 409 ? 'Já existe uma marca com esse nome.' : 'Não foi possível cadastrar marca.' } }, { status });
+  }
+  return NextResponse.json(data, { status: 201 });
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\api\admin\categories\route.ts
+============================================================
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { requireAdminApi } from '@/lib/auth/server';
+
+const inputSchema = z.object({ name: z.string().trim().min(2).max(100), displayOrder: z.number().int().default(0) });
+
+export async function GET(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  const q = new URL(request.url).searchParams.get('q')?.trim() ?? '';
+  let query = auth.supabase.from('categories').select('id,name,slug,display_order,is_active,created_at,updated_at,products(count)').order('display_order').order('name');
+  if (q) query = query.ilike('name', `%${q}%`);
+  const { data, error } = await query;
+  if (error) return NextResponse.json({ error: { code: 'CATEGORY_LIST_FAILED', message: 'Não foi possível carregar categorias.' } }, { status: 500 });
+  return NextResponse.json(data);
+}
+
+export async function POST(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  const parsed = inputSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: { code: 'CATEGORY_INVALID', message: 'Nome de categoria inválido.' } }, { status: 400 });
+  const { data, error } = await auth.supabase.rpc('admin_create_category', { p_name: parsed.data.name, p_display_order: parsed.data.displayOrder, p_user_id: auth.user.id });
+  if (error) {
+    const status = error.code === '23505' ? 409 : 500;
+    return NextResponse.json({ error: { code: 'CATEGORY_CREATE_FAILED', message: status === 409 ? 'Já existe uma categoria com esse nome.' : 'Não foi possível cadastrar categoria.' } }, { status });
+  }
+  return NextResponse.json(data, { status: 201 });
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\api\admin\products\route.ts
+============================================================
+import { NextResponse } from 'next/server';
+import { requireAdminApi } from '@/lib/auth/server';
+import { productSchema } from '@/lib/validations/product';
+import { slugifyProductName } from '@/lib/products/slug';
+import { productConflictMessage } from '@/lib/products/database-errors';
+
+export async function POST(request: Request) {
+  try {
+    const authorization = await requireAdminApi(request);
+    if (!authorization.ok) return authorization.response;
+    const { supabase, user } = authorization;
+
+    const validation = productSchema.safeParse(await request.json());
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Dados inválidos', details: validation.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const payload = { ...validation.data, slug: slugifyProductName(validation.data.name) };
+    const { data: productId, error } = await supabase.rpc('admin_save_product', {
+      p_product_id: null,
+      p_payload: payload,
+      p_user_id: user.id,
+    });
+
+    if (error || !productId) {
+      const conflictMessage = productConflictMessage(error);
+      const status = conflictMessage ? 409 : 500;
+      console.error('Erro transacional ao cadastrar produto:', error);
+      return NextResponse.json(
+        { error: conflictMessage ?? 'Erro ao cadastrar produto.' },
+        { status }
+      );
+    }
+
+    return NextResponse.json({ success: true, productId }, { status: 201 });
+  } catch (error) {
+    console.error('Erro interno na rota de produtos:', error);
+    return NextResponse.json({ error: 'Erro interno de servidor' }, { status: 500 });
+  }
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\api\admin\stock\adjust\route.ts
+============================================================
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { requireAdminApi } from '@/lib/auth/server';
+
+const schema = z.object({ variantId: z.string().uuid(), delta: z.number().finite().refine((value) => value !== 0), type: z.enum(['purchase', 'sale', 'damage', 'inventory_adjustment', 'return']), reason: z.string().trim().max(500).optional().default('') }).superRefine((movement, context) => {
+  if (['purchase', 'return'].includes(movement.type) && movement.delta <= 0) context.addIssue({ code: 'custom', path: ['delta'], message: 'Entradas e devoluções exigem quantidade positiva.' });
+  if (['sale', 'damage'].includes(movement.type) && movement.delta >= 0) context.addIssue({ code: 'custom', path: ['delta'], message: 'Vendas e avarias exigem quantidade negativa.' });
+});
+
+export async function POST(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  if (!['admin', 'manager'].includes(auth.profile.role)) return NextResponse.json({ error: { code: 'STOCK_ADMIN_REQUIRED', message: 'Acesso negado.' } }, { status: 403 });
+  const parsed = schema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: { code: 'STOCK_ADJUST_INVALID', message: 'Dados de movimentação inválidos.' } }, { status: 400 });
+  const signedDelta = ['sale', 'damage'].includes(parsed.data.type) ? -Math.abs(parsed.data.delta) : parsed.data.type === 'inventory_adjustment' ? parsed.data.delta : Math.abs(parsed.data.delta);
+  const reason = parsed.data.reason?.trim() || `Movimentação registrada: ${parsed.data.type}`;
+  const { data, error } = await auth.supabase.rpc('adjust_stock', { p_variant_id: parsed.data.variantId, p_delta: signedDelta, p_type: parsed.data.type, p_reason: reason });
+  if (error) return NextResponse.json({ error: { code: 'STOCK_ADJUST_FAILED', message: 'Não foi possível ajustar o estoque.' } }, { status: 409 });
+  return NextResponse.json(data);
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\api\admin\users\route.ts
+============================================================
+import { NextResponse } from 'next/server';
+import { requireAdminApi } from '@/lib/auth/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { z } from 'zod';
+
+const createUserSchema = z.object({
+  fullName: z.string().trim().min(2).max(150),
+  email: z.string().trim().toLowerCase().email().max(254),
+  role: z.enum(['admin', 'manager']),
+});
+
+export async function GET(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  if (auth.profile.role !== 'admin') return NextResponse.json({ error: { code: 'USER_ADMIN_REQUIRED', message: 'Acesso negado.' } }, { status: 403 });
+
+  const service = createServiceClient();
+  const [{ data: users, error: usersError }, { data: profiles, error: profilesError }] = await Promise.all([
+    service.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+    service.from('profiles').select('id, full_name, role, is_active, created_at, updated_at'),
+  ]);
+  if (usersError || profilesError) return NextResponse.json({ error: { code: 'USER_LIST_FAILED', message: 'Não foi possível carregar os usuários.' } }, { status: 500 });
+  const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  return NextResponse.json((users?.users ?? []).map((user) => ({
+    ...profileMap.get(user.id), id: user.id, email: user.email ?? null, lastSignInAt: user.last_sign_in_at ?? null,
+  })));
+}
+
+export async function PATCH(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  if (auth.profile.role !== 'admin') return NextResponse.json({ error: { code: 'USER_ADMIN_REQUIRED', message: 'Acesso negado.' } }, { status: 403 });
+  const body = await request.json().catch(() => null) as { id?: string; role?: string; isActive?: boolean } | null;
+  if (!body?.id || (body.role && !['admin', 'manager', 'attendant', 'viewer'].includes(body.role)) || typeof body.isActive !== 'boolean' && !body.role) {
+    return NextResponse.json({ error: { code: 'USER_UPDATE_INVALID', message: 'Dados de usuário inválidos.' } }, { status: 400 });
+  }
+  if (body.id === auth.user.id && body.isActive === false) return NextResponse.json({ error: { code: 'USER_SELF_DEACTIVATION', message: 'Não é possível desativar o próprio usuário.' } }, { status: 409 });
+  const { data, error } = await auth.supabase.rpc('admin_update_user', { p_user_id: body.id, p_role: body.role ?? null, p_is_active: typeof body.isActive === 'boolean' ? body.isActive : null });
+  if (error) return NextResponse.json({ error: { code: 'USER_UPDATE_FAILED', message: error.message.includes('ultimo') || error.message.includes('necessario') ? 'É necessário manter um administrador ativo.' : 'Não foi possível atualizar o usuário.' } }, { status: 409 });
+  return NextResponse.json(data);
+}
+
+export async function POST(request: Request) {
+  const auth = await requireAdminApi(request);
+  if (!auth.ok) return auth.response;
+  if (auth.profile.role !== 'admin') return NextResponse.json({ error: { code: 'USER_ADMIN_REQUIRED', message: 'Apenas administradores podem cadastrar usuários.' } }, { status: 403 });
+
+  const parsed = createUserSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: { code: 'USER_CREATE_INVALID', message: 'Informe nome, e-mail e uma role válida.' } }, { status: 400 });
+
+  const service = createServiceClient();
+  const { data: listed, error: listError } = await service.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (listError) return NextResponse.json({ error: { code: 'USER_LOOKUP_FAILED', message: 'Não foi possível verificar o e-mail informado.' } }, { status: 500 });
+  if ((listed.users ?? []).some((user) => user.email?.trim().toLowerCase() === parsed.data.email)) {
+    return NextResponse.json({ error: { code: 'USER_EMAIL_EXISTS', message: 'Já existe um usuário com este e-mail.' } }, { status: 409 });
+  }
+
+  const origin = new URL(request.url).origin;
+  const { data: invited, error: inviteError } = await service.auth.admin.inviteUserByEmail(parsed.data.email, { data: { full_name: parsed.data.fullName }, redirectTo: `${origin}/auth/accept-invite` });
+  if (inviteError || !invited.user) {
+    const duplicate = inviteError?.message.toLowerCase().includes('already') || inviteError?.message.toLowerCase().includes('exists');
+    return NextResponse.json({ error: { code: duplicate ? 'USER_EMAIL_EXISTS' : 'USER_INVITE_FAILED', message: duplicate ? 'Já existe um usuário com este e-mail.' : 'Não foi possível enviar o convite para este usuário.' } }, { status: duplicate ? 409 : 500 });
+  }
+
+  const { data: profile, error: profileError } = await service.from('profiles').upsert({ id: invited.user.id, full_name: parsed.data.fullName, role: parsed.data.role, is_active: true, updated_at: new Date().toISOString() }, { onConflict: 'id' }).select('id,full_name,role,is_active,created_at,updated_at').single();
+  if (profileError || !profile) {
+    await service.auth.admin.deleteUser(invited.user.id);
+    return NextResponse.json({ error: { code: 'USER_PROFILE_FAILED', message: 'NÃ£o foi possÃ­vel concluir o cadastro do usuÃ¡rio.' } }, { status: 500 });
+  }
+  if (profileError) return NextResponse.json({ error: { code: 'USER_PROFILE_FAILED', message: 'O convite foi criado, mas não foi possível concluir o perfil. Tente novamente.' } }, { status: 500 });
+
+  const { error: auditError } = await service.from('admin_audit_logs').insert({ user_id: auth.user.id, action: 'user_created', entity_type: 'profile', entity_id: invited.user.id, old_data: null, new_data: { full_name: profile.full_name, role: profile.role, is_active: profile.is_active, email: parsed.data.email } });
+  if (auditError) await service.auth.admin.deleteUser(invited.user.id);
+  if (auditError) return NextResponse.json({ error: { code: 'USER_AUDIT_FAILED', message: 'O usuário foi criado, mas não foi possível registrar a auditoria.' } }, { status: 500 });
+
+  if (auditError) {
+    await service.auth.admin.deleteUser(invited.user.id);
+  }
+  return NextResponse.json({ ...profile, id: invited.user.id, email: parsed.data.email, lastSignInAt: null }, { status: 201 });
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\app\api\orders\route.ts
+============================================================
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { createOrderSchema } from '@/lib/validations/order';
+import { createOrderTrackingToken, publicOrderError, requestFingerprint } from '@/lib/orders/security';
+import { consumeOrderBurstLimit } from '@/lib/orders/rate-limit';
+import { getRequestId, logError } from '@/lib/observability/logger';
+
+function rateLimited(retryAfter: number) {
+  return NextResponse.json(
+    { error: 'Muitas solicitações. Aguarde alguns minutos e tente novamente.' },
+    { status: 429, headers: { 'Retry-After': String(retryAfter), 'Cache-Control': 'no-store' } },
+  );
+}
+
+export async function POST(request: Request) {
+  const requestId = getRequestId(request);
+  try {
+    let fingerprint: string;
+    try {
+      fingerprint = requestFingerprint(request);
+    } catch (error) {
+      console.error('Identificacao segura do pedido indisponivel:', error);
+      return NextResponse.json({ error: 'Serviço temporariamente indisponível.' }, { status: 503 });
+    }
+    const burst = consumeOrderBurstLimit(fingerprint);
+    if (!burst.allowed) return rateLimited(burst.retryAfter);
+
+    const supabase = createServiceClient();
+    // Transacao separada: JSON invalido e falhas posteriores nao devolvem a cota.
+    const { data: limit, error: limitError } = await supabase.rpc('consume_order_rate_limit', {
+      p_fingerprint: fingerprint,
+      p_scope: 'attempt',
+    });
+    if (limitError || typeof limit?.allowed !== 'boolean'
+      || !Number.isInteger(limit?.retry_after) || limit.retry_after < 0 || limit.retry_after > 600) {
+      console.error('Limite persistente de pedidos indisponivel:', limitError?.code || 'invalid_response');
+      return NextResponse.json({ error: 'Serviço temporariamente indisponível.' }, { status: 503 });
+    }
+    if (!limit.allowed) return rateLimited(Math.max(1, limit.retry_after));
+
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (contentLength > 64 * 1024) {
+      return NextResponse.json({ error: 'Payload muito grande' }, { status: 413 });
+    }
+    const rawBody = await request.text();
+    if (Buffer.byteLength(rawBody, 'utf8') > 64 * 1024) {
+      return NextResponse.json({ error: 'Payload muito grande' }, { status: 413 });
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
+    }
+
+    const validation = createOrderSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Dados inválidos enviados no formulário', details: validation.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const {
+      customerName,
+      customerPhone,
+      address,
+      addressNumber,
+      neighborhood,
+      city,
+      complement,
+      referencePoint,
+      postalCode,
+      notes,
+      items,
+      idempotencyKey,
+    } = validation.data;
+
+    // Consolidação de itens duplicados
+    const consolidatedMap = new Map<string, number>();
+    for (const item of items) {
+      const current = consolidatedMap.get(item.variantId) || 0;
+      consolidatedMap.set(item.variantId, current + item.quantity);
+    }
+
+    const preparedItems = Array.from(consolidatedMap.entries()).map(([variantId, quantity]) => ({
+      variant_id: variantId,
+      quantity,
+    }));
+
+    const trackingToken = createOrderTrackingToken(idempotencyKey);
+
+    // A RPC so e acessivel pela API server-side e aplica rate limit persistente.
+    const { data, error } = await supabase.rpc('create_catalog_order', {
+      p_customer_name: customerName,
+      p_customer_phone: customerPhone,
+      p_address: address,
+      p_address_number: addressNumber,
+      p_neighborhood: neighborhood,
+      p_city: city,
+      p_complement: complement || '',
+      p_reference_point: referencePoint || '',
+      p_postal_code: postalCode || '',
+      p_notes: notes || '',
+      p_items: preparedItems,
+      p_request_fingerprint: fingerprint,
+      p_tracking_token: trackingToken,
+      p_idempotency_key: idempotencyKey,
+    });
+
+    if (error) {
+      const safeError = publicOrderError(error.message, error.code);
+      if (safeError.status >= 500) {
+        logError(safeError.code, error, { requestId, route: '/api/orders' });
+      }
+      return NextResponse.json(
+        { error: { code: safeError.code, message: safeError.message }, requestId },
+        {
+          status: safeError.status,
+          headers: safeError.status === 429 ? { 'Retry-After': '600' } : undefined,
+        }
+      );
+    }
+
+    return NextResponse.json({ ...(data as object), trackingToken }, { status: 201 });
+  } catch (error) {
+    logError('ORDER_CREATE_INTERNAL', error, { requestId, route: '/api/orders' });
+    return NextResponse.json({ error: 'Erro interno ao processar pedido' }, { status: 500 });
+  }
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\components\admin\MetricsOverview.tsx
+============================================================
+import { createClient } from '@/lib/supabase/server';
+import { ShoppingBag, MessageSquare, AlertTriangle, TrendingUp } from 'lucide-react';
+
+export async function MetricsOverview() {
+  const supabase = await createClient();
+
+  // Executar consultas agregadas em paralelo
+  const [
+    { count: totalOrders },
+    { count: whatsappClicks },
+    { data: lowStockVariants },
+    { data: recentOrders }
+  ] = await Promise.all([
+    supabase.from('orders').select('*', { count: 'exact', head: true }),
+    supabase.from('analytics_events').select('*', { count: 'exact', head: true }).eq('event_name', 'whatsapp_clicked'),
+    supabase.from('product_variants').select('id, name, stock_quantity, low_stock_threshold').lte('stock_quantity', 5),
+    supabase.from('orders').select('id, public_code, customer_name, total, status, created_at').order('created_at', { ascending: false }).limit(5)
+  ]);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div className="p-3 bg-blue-100 text-blue-600 rounded-lg">
+            <ShoppingBag className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase">Total de Pedidos</p>
+            <p className="text-2xl font-bold text-slate-900">{totalOrders || 0}</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div className="p-3 bg-emerald-100 text-emerald-600 rounded-lg">
+            <MessageSquare className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase">Cliques WhatsApp</p>
+            <p className="text-2xl font-bold text-slate-900">{whatsappClicks || 0}</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div className="p-3 bg-amber-100 text-amber-600 rounded-lg">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase">Estoque Baixo</p>
+            <p className="text-2xl font-bold text-slate-900">{lowStockVariants?.length || 0}</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div className="p-3 bg-indigo-100 text-indigo-600 rounded-lg">
+            <TrendingUp className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase">Taxa Conversão</p>
+            <p className="text-2xl font-bold text-slate-900">
+              {totalOrders && whatsappClicks ? ((whatsappClicks / totalOrders) * 100).toFixed(1) : 0}%
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabela de Pedidos Recentes */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-slate-100">
+          <h3 className="font-bold text-slate-800">Solicitações Recentes de Orçamento</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                <th className="p-3">Código</th>
+                <th className="p-3">Cliente</th>
+                <th className="p-3">Total</th>
+                <th className="p-3">Status</th>
+                <th className="p-3">Data</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {recentOrders?.map((order) => (
+                <tr key={order.id} className="hover:bg-slate-50">
+                  <td className="p-3 font-mono text-xs font-bold text-amber-700">{order.public_code}</td>
+                  <td className="p-3 text-slate-800">{order.customer_name}</td>
+                  <td className="p-3 font-medium">R$ {Number(order.total).toFixed(2)}</td>
+                  <td className="p-3">
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                      {order.status}
+                    </span>
+                  </td>
+                  <td className="p-3 text-slate-500 text-xs">
+                    {new Date(order.created_at).toLocaleDateString('pt-BR')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\components\admin\ProductForm.tsx
+============================================================
+'use client';
+
+import { useFieldArray, useForm } from 'react-hook-form';
+import { useEffect, useState } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { productSchema, type ProductInput, unitTypeEnum } from '@/lib/validations/product';
+import { Plus, Trash2, Save, ArrowLeft, Archive } from 'lucide-react';
+import Link from 'next/link';
+import { slugifyProductName } from '@/lib/products/slug';
+
+interface Props {
+  categories: { id: string; name: string }[];
+  brands: { id: string; name: string }[];
+  initialData?: Partial<ProductInput>;
+  onSubmit: (data: ProductInput) => Promise<void>;
+  onArchive?: () => Promise<void>;
+}
+
+const inputClass = 'w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-amber-500 outline-none';
+
+export function ProductForm({ categories, brands, initialData, onSubmit, onArchive }: Props) {
+  const { register, control, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<ProductInput>({
+    resolver: zodResolver(productSchema),
+    defaultValues: initialData || {
+      name: '', slug: '', sku: null, barcode: null, categoryId: categories[0]?.id || '', brandId: null, brand: null, unit: 'UN',
+      price: 0, purchasePrice: null, minimumQuantity: 1, stepQuantity: 1,
+      featured: false, isActive: true, searchTerms: [], images: [],
+      variants: [{ name: 'Padrão', sku: '', stockQuantity: 0, salePrice: null, lowStockThreshold: 5, isActive: true }],
+    },
+  });
+  const { fields, append, remove } = useFieldArray({ control, name: 'variants' });
+  const variants = watch('variants');
+  const productName = watch('name');
+  useEffect(() => { if (!initialData?.id) setValue('slug', slugifyProductName(productName || ''), { shouldValidate: true }); }, [initialData?.id, productName, setValue]);
+  const searchTerms = watch('searchTerms') || [];
+  const salePrice = Number(watch('price') || 0);
+  const purchasePrice = watch('purchasePrice');
+  const grossProfit = purchasePrice == null ? null : salePrice - Number(purchasePrice);
+  const margin = grossProfit == null || salePrice <= 0 ? null : (grossProfit / salePrice) * 100;
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submit = handleSubmit(async (data) => {
+    setSubmitError(null);
+    await onSubmit(data);
+  }, () => {
+    const firstError = Object.entries(errors)[0];
+    const detail = firstError?.[1] && typeof firstError[1] === 'object' && 'message' in firstError[1]
+      ? String(firstError[1].message)
+      : null;
+    setSubmitError(detail ? `Não foi possível salvar: ${detail}` : 'Revise os campos destacados antes de salvar o produto.');
+  });
+
+  return (
+    <form onSubmit={submit} noValidate className="space-y-8 max-w-5xl mx-auto p-6">
+      <div className="flex items-center justify-between border-b pb-4 gap-3">
+        <div className="flex items-center gap-3"><Link href="/admin/produtos" className="p-2 text-slate-500"><ArrowLeft className="h-5 w-5" /></Link><h1 className="text-xl font-bold">{initialData?.id ? 'Editar produto' : 'Novo produto'}</h1></div>
+        <div className="flex gap-2">
+          {onArchive && <button type="button" onClick={onArchive} className="border border-red-300 text-red-700 px-4 py-2.5 rounded-lg flex items-center gap-2"><Archive className="h-4 w-4" /> Arquivar</button>}
+          <button type="submit" disabled={isSubmitting} className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 disabled:opacity-50"><Save className="h-4 w-4" /> {isSubmitting ? 'Salvando...' : 'Salvar produto'}</button>
+        </div>
+      </div>
+      {submitError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{submitError}</p>}
+
+      <section className="bg-white p-6 rounded-xl border shadow-sm grid grid-cols-1 md:grid-cols-2 gap-4">
+        <h2 className="md:col-span-2 font-semibold border-b pb-2">Dados principais</h2>
+        <Field label="Nome *" error={errors.name?.message}><input {...register('name')} maxLength={150} className={inputClass} /></Field>
+        <Field label="Código/SKU"><input value={initialData?.sku || 'Será gerado automaticamente ao salvar'} readOnly className={`${inputClass} bg-slate-100 text-slate-500`} /></Field>
+        <input type="hidden" {...register('slug')} />
+        {errors.slug?.message && <p className="md:col-span-2 text-xs text-red-600">{errors.slug.message}</p>}
+        <Field label="Categoria *" error={errors.categoryId?.message}><select {...register('categoryId')} className={inputClass}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
+        <Field label="Marca" error={errors.brandId?.message}><select {...register('brandId')} className={inputClass}><option value="">Sem marca</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></Field>
+        <Field label="Unidade *"><select {...register('unit')} className={inputClass}>{unitTypeEnum.options.map((unit) => <option key={unit}>{unit}</option>)}</select></Field>
+        <Field label="Código de barras (GTIN)" error={errors.barcode?.message}><input {...register('barcode')} maxLength={14} inputMode="numeric" placeholder="Opcional" className={inputClass} /></Field>
+        <Field label="Preço de venda *" error={errors.price?.message}><input type="number" min="0.01" step="0.01" {...register('price')} className={inputClass} /></Field>
+        <Field label="Preço de compra (interno)" error={errors.purchasePrice?.message}><input type="number" min="0" step="0.01" {...register('purchasePrice')} className={inputClass} /></Field>
+        {margin != null && <div className="rounded-lg bg-slate-50 p-3 text-sm"><div>Custo: R$ {Number(purchasePrice).toFixed(2)}</div><div>Venda: R$ {salePrice.toFixed(2)}</div><div className="font-bold">Lucro bruto unitário: R$ {grossProfit?.toFixed(2)} · Margem: {margin.toFixed(1)}%</div></div>}
+        <Field label="Quantidade mínima" error={errors.minimumQuantity?.message}><input type="number" min="0.01" step="0.01" {...register('minimumQuantity')} className={inputClass} /></Field>
+        <Field label="Incremento de compra" error={errors.stepQuantity?.message}><input type="number" min="0.01" step="0.01" {...register('stepQuantity')} className={inputClass} /></Field>
+        <Field label="Cobertura por embalagem"><input type="number" min="0.01" step="0.01" {...register('coveragePerPackage')} className={inputClass} /></Field>
+        <Field label="Termos de busca (separados por vírgula)"><input value={searchTerms.join(', ')} onChange={(event) => setValue('searchTerms', event.target.value.split(',').map((term) => term.trim()).filter(Boolean), { shouldValidate: true })} className={inputClass} /></Field>
+        <div className="md:col-span-2"><Field label="Descrição curta"><input {...register('shortDescription')} maxLength={255} className={inputClass} /></Field></div>
+        <div className="md:col-span-2"><Field label="Descrição completa"><textarea {...register('description')} rows={4} className={inputClass} /></Field></div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('featured')} /> Produto em destaque</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('isActive')} /> Produto ativo</label>
+      </section>
+
+      <section className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
+        <div className="flex justify-between border-b pb-2"><h2 className="font-semibold">Variações e estoque</h2><button type="button" onClick={() => append({ name: '', sku: '', color: '', size: '', length: '', stockQuantity: 0, salePrice: null, lowStockThreshold: 5, isActive: true })} className="text-xs bg-slate-100 px-3 py-1.5 rounded-md flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> Adicionar variação</button></div>
+        <p className="text-xs text-slate-500">Ao remover uma variação usada em pedidos, ela será desativada e continuará disponível aqui para consulta.</p>
+        {fields.map((field, index) => (
+          <div key={field.id} className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-lg border">
+            <input type="hidden" {...register(`variants.${index}.id`)} />
+            <Field label="Nome *" error={errors.variants?.[index]?.name?.message}><input {...register(`variants.${index}.name`)} maxLength={100} className={inputClass} /></Field>
+            <Field label="SKU"><input value={field.sku || 'Gerado ao salvar'} readOnly className={`${inputClass} bg-slate-100 text-slate-500`} /></Field>
+            <Field label="Código de barras" error={errors.variants?.[index]?.barcode?.message}><input {...register(`variants.${index}.barcode`)} maxLength={14} inputMode="numeric" className={inputClass} /></Field>
+            <Field label="Cor"><input {...register(`variants.${index}.color`)} maxLength={50} className={inputClass} /></Field>
+            <Field label="Tamanho"><input {...register(`variants.${index}.size`)} maxLength={50} className={inputClass} /></Field>
+            <Field label="Comprimento"><input {...register(`variants.${index}.length`)} maxLength={50} className={inputClass} /></Field>
+            <Field label={variants[index]?.id ? 'Estoque atual (use Controle de estoque)' : 'Saldo inicial'}><input type="number" min="0" step="0.01" readOnly={Boolean(variants[index]?.id)} {...register(`variants.${index}.stockQuantity`)} className={`${inputClass} ${variants[index]?.id ? 'bg-slate-100 text-slate-500' : ''}`} /></Field>
+            <Field label="Preço de venda da variação"><input type="number" min="0.01" step="0.01" placeholder={`Usa R$ ${salePrice.toFixed(2)}`} {...register(`variants.${index}.salePrice`)} className={inputClass} /></Field>
+            <Field label="Alerta de estoque"><input type="number" min="0" step="0.01" {...register(`variants.${index}.lowStockThreshold`)} className={inputClass} /></Field>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register(`variants.${index}.isActive`)} /> Variação ativa</label>
+            {fields.length > 1 && <button type="button" onClick={() => remove(index)} className="justify-self-start text-red-600 text-sm flex items-center gap-1"><Trash2 className="h-4 w-4" /> Remover</button>}
+          </div>
+        ))}
+        {errors.variants?.message && <p className="text-red-600 text-xs">{errors.variants.message}</p>}
+      </section>
+    </form>
+  );
+}
+
+function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+  return <label className="block text-xs font-semibold text-slate-700 space-y-1"><span>{label}</span>{children}{error && <span className="block text-red-600 font-normal">{error}</span>}</label>;
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\components\admin\StockManager.tsx
+============================================================
+'use client';
+import { useState } from 'react';
+type Variant={id:string;name:string;stock_quantity:number;low_stock_threshold:number;productName:string};
+export function StockManager({variants:initial}:{variants:Variant[]}){const [variants,setVariants]=useState(initial);const[selected,setSelected]=useState(initial[0]?.id??'');const[type,setType]=useState('purchase');const[delta,setDelta]=useState('');const[reason,setReason]=useState('');const[message,setMessage]=useState('');
+async function submit(e:React.FormEvent){e.preventDefault();setMessage('');const value=Number(delta);const signed=type==='inventory_adjustment'?value:['damage','sale'].includes(type)?-Math.abs(value):Math.abs(value);const response=await fetch('/api/admin/stock/adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({variantId:selected,type,delta:signed,reason})});const result=await response.json();if(!response.ok){setMessage(result.error?.message??'Não foi possível registrar.');return;}setVariants(rows=>rows.map(row=>row.id===selected?{...row,stock_quantity:result.new_quantity}:row));setDelta('');setReason('');setMessage('Movimentação registrada.');}
+return <div className="space-y-6"><div className="overflow-x-auto rounded-xl border bg-white"><table className="w-full text-sm"><thead className="bg-slate-50 text-left"><tr><th className="p-3">Produto</th><th className="p-3">Variação</th><th className="p-3">Atual</th><th className="p-3">Mínimo</th></tr></thead><tbody>{variants.map(v=><tr key={v.id} className="border-t"><td className="p-3">{v.productName}</td><td className="p-3">{v.name}</td><td className="p-3 font-bold">{v.stock_quantity}</td><td className="p-3">{v.low_stock_threshold}</td></tr>)}</tbody></table></div><form onSubmit={submit} className="max-w-xl space-y-3 rounded-xl border bg-white p-5"><h2 className="font-bold">Registrar movimentação</h2>{message&&<p className="text-sm text-slate-600">{message}</p>}<select required value={selected} onChange={e=>setSelected(e.target.value)} className="w-full rounded border p-2">{variants.map(v=><option key={v.id} value={v.id}>{v.productName} — {v.name}</option>)}</select><select value={type} onChange={e=>{setType(e.target.value);setDelta('')}} className="w-full rounded border p-2"><option value="purchase">Entrada de compra (+)</option><option value="return">Devolução (+)</option><option value="damage">Avaria (-)</option><option value="sale">Venda (-)</option><option value="inventory_adjustment">Ajuste de inventário (+/-)</option></select><input required type="number" step="0.01" value={delta} onChange={e=>setDelta(e.target.value)} placeholder={type==='inventory_adjustment'?'Quantidade (use - para reduzir)':'Quantidade'} className="w-full rounded border p-2"/><textarea maxLength={500} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motivo (opcional)" className="w-full rounded border p-2"/><button className="rounded bg-amber-600 px-4 py-2 font-bold text-white">Registrar</button></form></div>}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\components\ui\ProductCard.tsx
+============================================================
+'use client';
+
+import Image from 'next/image';
+import Link from 'next/link';
+import { ShoppingCart, Check } from 'lucide-react';
+import { useCartStore } from '@/store/useCartStore';
+import { useState } from 'react';
+
+interface ProductCardProps {
+  product: {
+    id: string;
+    name: string;
+    slug: string;
+    brand?: string | null;
+    price: number;
+    unit: string;
+    minimum_quantity: number;
+    step_quantity: number;
+    product_variants?: Array<{
+      id: string;
+      name: string;
+      sku: string | null;
+      sale_price: number;
+      stock_quantity: number;
+    }>;
+    product_images?: Array<{ storage_path: string; is_primary: boolean }>;
+  };
+}
+
+export function ProductCard({ product, compact = false, featured = false }: ProductCardProps & { compact?: boolean; featured?: boolean }) {
+  const addItem = useCartStore((state) => state.addItem);
+  const [added, setAdded] = useState(false);
+  const minimum = Number(product.minimum_quantity || 1);
+  const variants = product.product_variants || [];
+  const defaultVariant = [...variants]
+    .filter((variant) => Number(variant.stock_quantity) >= minimum)
+    .sort((a, b) => Number(a.sale_price) - Number(b.sale_price))[0];
+  const primaryImage = (
+    product.product_images?.find((image) => image.is_primary)
+    || product.product_images?.[0]
+  )?.storage_path;
+  const finalPrice = Number(defaultVariant?.sale_price ?? product.price);
+
+  const handleAddToCart = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!defaultVariant) return;
+    addItem({
+      productId: product.id,
+      variantId: defaultVariant.id,
+      name: product.name,
+      variantName: defaultVariant.name,
+      sku: defaultVariant.sku || '',
+      price: finalPrice,
+      unit: product.unit,
+      quantity: minimum,
+      stepQuantity: Number(product.step_quantity || 1),
+      minimumQuantity: minimum,
+      maxStock: Number(defaultVariant.stock_quantity),
+    });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1500);
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col justify-between overflow-hidden group">
+      <Link href={`/produtos/${product.slug}`} className="block">
+        <div className={`relative ${compact ? 'h-32' : 'h-48'} w-full bg-slate-100 flex items-center justify-center overflow-hidden`}>
+          {featured && <span className="absolute right-2 top-2 z-10 rounded bg-amber-600 px-2 py-1 text-[10px] font-bold text-white">★ DESTAQUE</span>}
+          {primaryImage ? (
+            <Image
+              src={primaryImage}
+              alt={product.name}
+              fill
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+              className="object-cover group-hover:scale-105 transition"
+            />
+          ) : <span className="text-slate-400 text-xs font-semibold uppercase">Sem imagem</span>}
+        </div>
+        <div className={`${compact ? 'p-3' : 'p-4'} space-y-2`}>
+          {product.brand && <span className="text-[11px] font-bold text-amber-700 uppercase block">{product.brand}</span>}
+          <h3 className="font-semibold text-slate-800 text-sm line-clamp-2">{product.name}</h3>
+        </div>
+      </Link>
+
+      <div className={`${compact ? 'p-3' : 'p-4'} border-t border-slate-100 flex items-center justify-between`}>
+        <div>
+          <span className="text-xs text-slate-400 block">{defaultVariant ? 'A partir de' : 'Indisponível'}</span>
+          <span className="text-lg font-bold text-slate-900">R$ {finalPrice.toFixed(2)}</span>
+          <span className="text-xs text-slate-500"> / {product.unit}</span>
+        </div>
+        {variants.length > 1 ? <Link href={`/produtos/${product.slug}`} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white">Escolher opção</Link> : <button
+          type="button"
+          onClick={handleAddToCart}
+          onTouchEnd={(event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.click(); }}
+          disabled={!defaultVariant}
+          className={`min-h-11 min-w-11 p-2.5 rounded-lg transition touch-manipulation ${added ? 'bg-emerald-600' : 'bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 disabled:cursor-not-allowed'} text-white`}
+          title={defaultVariant ? 'Adicionar ao carrinho' : 'Produto sem estoque disponível'}
+          aria-label={defaultVariant ? 'Adicionar ao carrinho' : 'Produto indisponível'}
+        >
+          {added ? <Check className="h-5 w-5" /> : <ShoppingCart className="h-5 w-5" />}
+        </button>}
+      </div>
+    </div>
+  );
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\components\ui\ProductDetails.tsx
+============================================================
+'use client';
+
+import { useState } from 'react';
+import Image from 'next/image';
+import { ShoppingCart, Check, Plus, Minus, PackageCheck, AlertTriangle } from 'lucide-react';
+import { useCartStore } from '@/store/useCartStore';
+
+interface Variant {
+  id: string;
+  name: string;
+  sku: string | null;
+  sale_price: number;
+  stock_quantity: number;
+  low_stock_threshold: number;
+}
+
+interface ProductDetailsProps {
+  product: {
+    id: string;
+    name: string;
+    description?: string | null;
+    brand?: string | null;
+    price: number;
+    unit: string;
+    minimum_quantity: number;
+    step_quantity: number;
+    product_variants: Variant[];
+    product_images?: Array<{ storage_path: string; is_primary: boolean }>;
+  };
+}
+
+export function ProductDetails({ product }: ProductDetailsProps) {
+  const variants = product.product_variants || [];
+  const minimum = Number(product.minimum_quantity || 1);
+  const step = Number(product.step_quantity || 1);
+  const initialVariant = [...variants].sort((a, b) => {
+    const aAvailable = Number(a.stock_quantity) >= minimum ? 0 : 1;
+    const bAvailable = Number(b.stock_quantity) >= minimum ? 0 : 1;
+    return aAvailable - bAvailable;
+  })[0] || null;
+  const [selectedVariant, setSelectedVariant] = useState<Variant | null>(initialVariant);
+  const [quantity, setQuantity] = useState(minimum);
+  const [added, setAdded] = useState(false);
+  const addItem = useCartStore((state) => state.addItem);
+  const unitPrice = Number(selectedVariant?.sale_price ?? product.price);
+  const totalPrice = unitPrice * quantity;
+  const primaryImage = (
+    product.product_images?.find((image) => image.is_primary)
+    || product.product_images?.[0]
+  )?.storage_path;
+
+  const handleIncrease = () => {
+    if (!selectedVariant) return;
+    setQuantity((current) => Math.min(Number((current + step).toFixed(4)), Number(selectedVariant.stock_quantity)));
+  };
+  const handleDecrease = () => {
+    setQuantity((current) => Math.max(minimum, Number((current - step).toFixed(4))));
+  };
+  const handleAddToCart = () => {
+    if (!selectedVariant || selectedVariant.stock_quantity < quantity) return;
+    addItem({
+      productId: product.id,
+      variantId: selectedVariant.id,
+      name: product.name,
+      variantName: selectedVariant.name,
+      sku: selectedVariant.sku || '',
+      price: unitPrice,
+      unit: product.unit,
+      quantity,
+      stepQuantity: step,
+      minimumQuantity: minimum,
+      maxStock: Number(selectedVariant.stock_quantity),
+    });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="relative h-80 sm:h-96 w-full bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center">
+        {primaryImage ? (
+          <Image src={primaryImage} alt={product.name} fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover" />
+        ) : <span className="text-slate-400 text-sm">Sem imagem disponível</span>}
+      </div>
+
+      <div className="space-y-6 flex flex-col justify-between">
+        <div className="space-y-3">
+          {product.brand && <span className="text-xs font-bold text-amber-700 uppercase">Marca: {product.brand}</span>}
+          <h1 className="text-2xl font-bold text-slate-900">{product.name}</h1>
+          <p className="text-sm text-slate-600">{product.description || 'Sem descrição cadastrada.'}</p>
+          {variants.length > 0 && (
+            <div className="space-y-2 pt-2">
+              <label className="block text-xs font-semibold uppercase text-slate-700">Opção / Variação:</label>
+              <div className="flex flex-wrap gap-2">
+                {variants.map((variant) => (
+                  <button
+                    disabled={Number(variant.stock_quantity) < minimum}
+                    key={variant.id}
+                    onClick={() => { setSelectedVariant(variant); setQuantity(minimum); }}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold border ${selectedVariant?.id === variant.id ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-slate-300'}`}
+                  >{variant.name}{Number(variant.stock_quantity) < minimum && ' — Esgotado'}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="pt-2">
+            {!selectedVariant ? (
+              <span className="inline-flex text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">Produto sem variação disponível</span>
+            ) : selectedVariant.stock_quantity < minimum ? (
+              <span className="inline-flex text-xs font-semibold text-red-600 bg-red-50 px-2.5 py-1 rounded-full">Esgotado no momento</span>
+            ) : selectedVariant.stock_quantity <= selectedVariant.low_stock_threshold ? (
+              <span className="inline-flex items-center text-xs font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full"><AlertTriangle className="h-3.5 w-3.5 mr-1" /> Últimas unidades disponíveis</span>
+            ) : (
+              <span className="inline-flex items-center text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full"><PackageCheck className="h-3.5 w-3.5 mr-1" /> Disponível em estoque</span>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4 border-t pt-4">
+          <div className="flex justify-between">
+            <span className="text-2xl font-bold">R$ {unitPrice.toFixed(2)} <small>/ {product.unit}</small></span>
+            <span className="text-xl font-bold text-amber-700">R$ {totalPrice.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center border rounded-lg bg-slate-50">
+              <button onClick={handleDecrease} disabled={quantity <= minimum} className="p-2.5 disabled:opacity-40"><Minus className="h-4 w-4" /></button>
+              <span className="px-4 font-bold text-sm">{quantity} {product.unit}</span>
+              <button onClick={handleIncrease} disabled={!selectedVariant || quantity + step > selectedVariant.stock_quantity} className="p-2.5 disabled:opacity-40"><Plus className="h-4 w-4" /></button>
+            </div>
+            <button
+              onClick={handleAddToCart}
+              disabled={!selectedVariant || selectedVariant.stock_quantity < quantity}
+              className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${added ? 'bg-emerald-600' : 'bg-amber-600 hover:bg-amber-700'} text-white disabled:opacity-50`}
+            >
+              {added ? <><Check className="h-5 w-5" /> Adicionado!</> : <><ShoppingCart className="h-5 w-5" /> Adicionar ao Carrinho</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+============================================================
+ARQUIVO: C:\Projetos\OMC_SITE\src\lib\validations\product.ts
+============================================================
+import { z } from 'zod';
+
+export function normalizeGtin(value: string) { return value.replace(/\D/g, ''); }
+export function isSupportedBarcode(value: string) {
+  return [8, 12, 13, 14].includes(normalizeGtin(value).length);
+}
+
+const optionalPositiveNumber = z.preprocess(
+  (value) => value === '' || value === undefined || value === null ? null : value,
+  z.coerce.number().finite().positive().nullable()
+);
+const optionalNonNegativeNumber = z.preprocess((value) => value === '' || value === undefined || value === null ? null : value, z.coerce.number().min(0).nullable());
+
+export const unitTypeEnum = z.enum([
+  'UN', 'KG', 'G', 'M', 'M2', 'M3', 'L', 'ML', 'CX', 'PCT', 'SC', 'RL', 'PAR', 'KIT'
+]);
+
+export const productVariantSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1, 'Nome da variação é obrigatório').max(100),
+  sku: z.string().max(50).optional().nullable(),
+  barcode: z.string().transform(normalizeGtin).refine((value) => value === '' || isSupportedBarcode(value), 'O código de barras deve ter 8, 12, 13 ou 14 dígitos').optional().nullable(),
+  color: z.string().max(50).optional().nullable(),
+  size: z.string().max(50).optional().nullable(),
+  length: z.string().max(50).optional().nullable(),
+  salePrice: optionalPositiveNumber,
+  stockQuantity: z.coerce.number().min(0, 'Estoque não pode ser negativo').default(0),
+  lowStockThreshold: z.coerce.number().min(0).default(5),
+  isActive: z.boolean().default(true),
+});
+
+export const productImageSchema = z.object({
+  id: z.string().uuid().optional(),
+  storagePath: z.string().min(1, 'Caminho da imagem é obrigatório'),
+  altText: z.string().max(150).optional().nullable(),
+  displayOrder: z.number().int().default(0),
+  isPrimary: z.boolean().default(false),
+});
+
+export const productSchema = z.object({
+  id: z.string().uuid().optional(),
+  categoryId: z.string().uuid('Selecione uma categoria válida'),
+  brandId: z.preprocess((value) => value === '' || value == null ? null : value, z.string().uuid('Selecione uma marca válida').nullable()),
+  name: z.string().min(3, 'Nome do produto deve ter pelo menos 3 caracteres').max(150),
+  slug: z.string().min(3).max(180).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use apenas letras minúsculas, números e hífens'),
+  sku: z.string().max(50).optional().nullable(),
+  barcode: z.string().transform(normalizeGtin).refine((value) => value === '' || isSupportedBarcode(value), 'O código de barras deve ter 8, 12, 13 ou 14 dígitos').optional().nullable(),
+  shortDescription: z.string().max(255).optional().nullable(),
+  description: z.string().optional().nullable(),
+  brand: z.string().max(80).optional().nullable(),
+  unit: unitTypeEnum,
+  price: z.coerce.number().positive('O preço deve ser maior que zero'),
+  purchasePrice: optionalNonNegativeNumber,
+  minimumQuantity: z.coerce.number().positive('Quantidade mínima deve ser maior que zero').default(1),
+  stepQuantity: z.coerce.number().positive('Passo fracionado deve ser maior que zero').default(1),
+  coveragePerPackage: optionalPositiveNumber,
+  featured: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+  variants: z.array(productVariantSchema).min(1, 'Adicione pelo menos uma variação do produto'),
+  images: z.array(productImageSchema).default([]),
+  searchTerms: z.array(z.string().trim().min(1).max(100)).max(30).default([]),
+});
+
+export type ProductInput = z.infer<typeof productSchema>;
+export type ProductVariantInput = z.infer<typeof productVariantSchema>;
