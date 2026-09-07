@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:test": "node scripts/dev-test.mjs",
+    "dev:test:lan": "node scripts/dev-test-lan.mjs",
     "test:smoke": "node scripts/test-smoke.mjs",
     "test:smoke:headed": "node scripts/test-smoke.mjs --headed",
     "build": "next build",

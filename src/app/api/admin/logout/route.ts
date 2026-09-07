@@ -5,7 +5,7 @@ import { validateAdminOrigin } from '@/lib/auth/server';
 export async function POST(request: Request) {
   if (!validateAdminOrigin(request)) {
     return NextResponse.json(
-      { error: { code: 'CSRF_ORIGIN_DENIED', message: 'Origem da requisiÃ§Ã£o nÃ£o permitida.' } },
+      { error: { code: 'CSRF_ORIGIN_DENIED', message: 'Origem da requisiÒ§Ò£o nÒ£o permitida.' } },
       { status: 403, headers: { 'Cache-Control': 'private, no-store' } },
     );
   }
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   if (error) {
     console.error('AUTH_LOGOUT_FAILED', error.code || 'unknown');
     return NextResponse.json(
-      { error: { code: 'AUTH_LOGOUT_FAILED', message: 'NÃ£o foi possÃ­vel encerrar a sessÃ£o.' } },
+      { error: { code: 'AUTH_LOGOUT_FAILED', message: 'NÒ£o foi possÒ­vel encerrar a sessÒ£o.' } },
       { status: 500, headers: { 'Cache-Control': 'private, no-store' } },
     );
   }

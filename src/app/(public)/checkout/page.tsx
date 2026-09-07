@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCartStore } from '@/store/useCartStore';
 import { formatPostalCode, normalizePhone, normalizePostalCode } from '@/lib/validations/order';
 import Link from 'next/link';
+import { randomUuid } from '@/lib/browser/random-uuid';
 
 type OrderResponse = {
   orderId: string;
@@ -72,7 +73,7 @@ export default function CheckoutPage() {
     setLoading(true);
     try {
       const storageKey = 'omc_order_idempotency_key';
-      const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+      const idempotencyKey = sessionStorage.getItem(storageKey) || randomUuid();
       sessionStorage.setItem(storageKey, idempotencyKey);
       const response = await fetch('/api/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -88,7 +89,7 @@ export default function CheckoutPage() {
         throw new Error(errorMessage || 'Erro ao registrar pedido');
       }
 
-      const sessionId = sessionStorage.getItem('omc_checkout_session') || crypto.randomUUID();
+      const sessionId = sessionStorage.getItem('omc_checkout_session') || randomUuid();
       sessionStorage.setItem('omc_checkout_session', sessionId);
       let text = '*SOLICITAÇÃO DE ORÇAMENTO - OLIVEIRA MATERIAL DE CONSTRUÇÃO*\n';
       text += `*Código:* ${result.publicCode}\n*Cliente:* ${formData.customerName}\n*Telefone:* ${formData.customerPhone}\n`;

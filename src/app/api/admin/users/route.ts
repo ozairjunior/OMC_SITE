@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   const { data: profile, error: profileError } = await service.from('profiles').upsert({ id: invited.user.id, full_name: parsed.data.fullName, role: parsed.data.role, is_active: true, updated_at: new Date().toISOString() }, { onConflict: 'id' }).select('id,full_name,role,is_active,created_at,updated_at').single();
   if (profileError || !profile) {
     await service.auth.admin.deleteUser(invited.user.id);
-    return NextResponse.json({ error: { code: 'USER_PROFILE_FAILED', message: 'NÃ£o foi possÃ­vel concluir o cadastro do usuÃ¡rio.' } }, { status: 500 });
+    return NextResponse.json({ error: { code: 'USER_PROFILE_FAILED', message: 'Não foi possível concluir o cadastro do usuário.' } }, { status: 500 });
   }
   if (profileError) return NextResponse.json({ error: { code: 'USER_PROFILE_FAILED', message: 'O convite foi criado, mas não foi possível concluir o perfil. Tente novamente.' } }, { status: 500 });
 
