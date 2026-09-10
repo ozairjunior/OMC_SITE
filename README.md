@@ -49,8 +49,6 @@ Catalogo digital da Oliveira Material de Construcao, desenvolvido com Next.js, T
 
 ## Seguranca
 
-Nunca versione ou compartilhe `.env.local`, chaves `service_role`, cookies, tokens ou senhas.
-
 A `SUPABASE_SERVICE_ROLE_KEY` deve existir apenas no ambiente do servidor.
 
 Leia tambem:
